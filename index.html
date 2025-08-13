@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>RatTube — Load More + Fallback Thumbs</title>
+<style>
+  :root{
+    --bg:#0f1113;
+    --card:#141618;
+    --muted:#bfc6cb;
+    --accent:#8b7765;
+    --accent-2:#a8937c;
+    --danger:#ff5252;
+    --glass: rgba(255,255,255,0.03);
+  }
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,#0b0c0d 0%, #0f1113 100%);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;color:#fff}
+  header.top {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:12px 18px;
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+    border-bottom:1px solid rgba(255,255,255,0.03);
+    position:sticky;
+    top:0;
+    z-index:50;
+    backdrop-filter: blur(6px);
+  }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .logo {
+    width:52px;height:52px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2)); font-weight:700;
+    box-shadow: 0 6px 18px rgba(11,11,11,0.6);
+    flex-shrink:0;
+  }
+  .logo svg { width:28px; height:28px; color: #fff; display:block; }
+  h1 { margin:0;font-size:18px; letter-spacing:0.2px; }
+  .brand .meta { line-height:1; }
+  .brand .meta .title { font-weight:700; font-size:16px; margin-bottom:2px; }
+  .brand .meta .note { color:var(--muted); font-size:12px; }
+
+  .controls { display:flex; gap:10px; align-items:center; }
+  .search {
+    display:flex; align-items:center; gap:8px;
+    background:var(--glass); padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.03);
+  }
+  .search input {
+    background:transparent; border:0; outline:0; color:var(--muted); width:300px; font-size:14px;
+  }
+  .btn {
+    background:var(--accent); color:#fff; border:0; padding:9px 12px; border-radius:10px; cursor:pointer; font-weight:600;
+  }
+  .btn.ghost { background:transparent; border:1px solid rgba(255,255,255,0.04); color:var(--muted); }
+  main { padding:20px; min-height:60vh; }
+
+  /* grid */
+  .grid {
+    display:grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap:18px;
+    align-items:start;
+  }
+  @media (max-width:1100px){ .grid { grid-template-columns: repeat(3,1fr); } }
+  @media (max-width:800px){ .grid { grid-template-columns: repeat(2,1fr); } }
+  @media (max-width:480px){ .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.007));
+    border-radius:12px;
+    overflow:hidden;
+    box-shadow: 0 8px 30px rgba(2,6,10,0.6);
+    cursor:pointer;
+    transition: transform .18s ease, box-shadow .18s ease;
+    border: 1px solid rgba(255,255,255,0.02);
+  }
+  .card:hover{ transform: translateY(-6px) scale(1.01); box-shadow: 0 14px 40px rgba(2,6,10,0.75); }
+  .thumb {
+    width:100%; height:170px; object-fit:cover; display:block;
+    background:linear-gradient(180deg,#111,#222);
+  }
+  .meta { padding:12px; }
+  .title { font-size:15px; color:#e9eef0; line-height:1.25; margin:0 0 6px 0; height:38px; overflow:hidden; text-overflow:ellipsis; }
+  .sub { font-size:12px; color:var(--muted); }
+
+  /* loader */
+  .loader { text-align:center; padding:20px 0; color:var(--muted); }
+
+  /* load more bar */
+  .loadbar { display:flex; justify-content:center; padding:20px 0; }
+  .load-more {
+    padding:12px 18px; border-radius:10px; border:0; cursor:pointer; background:linear-gradient(90deg,var(--accent),var(--accent-2));
+    color:#fff; font-weight:700; font-size:16px;
+  }
+  .load-more[disabled] { opacity:0.5; cursor:not-allowed; }
+
+  /* modal */
+  .overlay {
+    position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:999;
+    background: linear-gradient(180deg, rgba(0,0,0,0.7), rgba(0,0,0,0.85));
+    padding:20px;
+  }
+  .modal {
+    width: min(1000px, 96%); background: #0f1315; border-radius:14px; overflow:hidden; box-shadow:0 40px 120px rgba(2,6,10,0.8);
+    border:1px solid rgba(255,255,255,0.03); display:flex; flex-direction:column; align-items:center;
+    transform: translateY(18px); opacity:0; transition: transform .22s ease, opacity .22s ease;
+  }
+  .modal.open { transform: translateY(0); opacity:1; }
+  .player {
+    width:100%; aspect-ratio: 16/9; background:#000;
+  }
+  .controls-box {
+    display:flex; gap:10px; width:100%; padding:12px; background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));
+    border-top:1px solid rgba(255,255,255,0.02);
+  }
+  .controls-box .big {
+    flex:1; padding:12px; border-radius:8px; border:0; font-weight:700; cursor:pointer; font-size:16px;
+  }
+  .open-youtube { background:transparent; color:var(--muted); border:1px solid rgba(255,255,255,0.03); }
+  .download { background: linear-gradient(90deg,var(--accent),var(--accent-2)); color:#fff; }
+  .close-center { margin:10px auto 16px auto; padding:8px 12px; border-radius:8px; background:var(--danger); color:#fff; border:0; font-weight:700; cursor:pointer; }
+
+  /* small helpers */
+  .top-note { color:var(--muted); font-size:13px; margin-left:6px; }
+  .empty { text-align:center; color:var(--muted); padding:40px; }
+
+  /* lazy image */
+  img.lazy { filter: blur(6px) brightness(.9); transform: scale(1.02); transition: filter .45s ease, transform .45s ease; }
+  img.lazy.loaded { filter: none; transform: none; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">
+      <!-- user-supplied logo SVG -->
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="28" height="28">
+        <path d="M13 22H4a2 2 0 0 1 0-4h12"></path>
+        <path d="M13.236 18a3 3 0 0 0-2.2-5"></path>
+        <path d="M16 9h.01"></path>
+        <path d="M16.82 3.94a3 3 0 1 1 3.237 4.868l1.815 2.587a1.5 1.5 0 0 1-1.5 2.1l-2.872-.453a3 3 0 0 0-3.5 3"></path>
+        <path d="M17 4.988a3 3 0 1 0-5.2 2.052A7 7 0 0 0 4 14.015 4 4 0 0 0 8 18"></path>
+      </svg>
+    </div>
+    <div class="meta">
+      <div class="title">RatTube</div>
+      <div class="note">Load 20 first — then click "Load more" for 10 more</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="search" role="search">
+      <input id="searchInput" placeholder="Search (Enter to search) — or click Enter Link" />
+      <!-- swapped: SEARCH button first, then ENTER LINK -->
+      <button class="btn" id="searchBtn">Search</button>
+      <button class="btn ghost" id="enterLinkBtn">Enter Link</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="grid" class="grid" aria-live="polite"></div>
+
+  <div class="loadbar">
+    <button id="loadMoreBtn" class="load-more">Load more (10)</button>
+  </div>
+
+  <div id="loader" class="loader" style="display:none">Loading…</div>
+  <div id="endNote" class="empty" style="display:none">No more results right now.</div>
+</main>
+
+<!-- modal -->
+<div id="overlay" class="overlay" aria-hidden="true">
+  <div id="modal" class="modal" role="dialog" aria-modal="true">
+    <div id="playerWrap" style="width:100%;">
+      <iframe id="player" class="player" src="" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>
+    </div>
+
+    <div class="controls-box" id="modalButtons">
+      <button id="openYoutube" class="big open-youtube">Open on YouTube</button>
+      <button id="download" class="big download">Download</button>
+    </div>
+
+    <button id="closeBtn" class="close-center">❌ Close</button>
+  </div>
+</div>
+
+<script>
+/* =========================
+   Config + state
+   (Same logic as before; only header + logo + button order changed)
+   ========================= */
+const DEFAULT_SEARCHES = [
+  "I bought", "last to leave wins", "futuristic tech",
+  "try not to laugh", "stick figure animated storytime", "Fred Buyers"
+];
+
+const PROXY = 'https://corsproxy.io/?';
+const INITIAL_LOAD_COUNT = 20; // initial seed
+const LOAD_MORE_COUNT = 10;    // each click loads this many
+let feedQueue = [];
+let currentQuery = '';
+let resultsCache = [];   // cached parsed {id,title}
+let resultsIndex = 0;    // pointer into resultsCache
+let isFetching = false;
+let seenIds = new Set();
+
+/* UI elems */
+const grid = document.getElementById('grid');
+const loader = document.getElementById('loader');
+const overlay = document.getElementById('overlay');
+const modal = document.getElementById('modal');
+const player = document.getElementById('player');
+const openYoutube = document.getElementById('openYoutube');
+const downloadBtn = document.getElementById('download');
+const closeBtn = document.getElementById('closeBtn');
+const searchInput = document.getElementById('searchInput');
+const searchBtn = document.getElementById('searchBtn');
+const enterLinkBtn = document.getElementById('enterLinkBtn');
+const loadMoreBtn = document.getElementById('loadMoreBtn');
+const endNote = document.getElementById('endNote');
+
+function resetFeedQueue(){ feedQueue = shuffleArray([...DEFAULT_SEARCHES]); }
+resetFeedQueue();
+
+/* =========================
+   Helpers
+   ========================= */
+function shuffleArray(a){ return a.sort(()=>Math.random()-0.5); }
+function showLoader(on=true){ loader.style.display = on ? 'block' : 'none'; }
+
+/* fallback data URI SVG for missing thumbnails */
+const FALLBACK_SVG = encodeURI(
+  `<svg xmlns='http://www.w3.org/2000/svg' width='480' height='270'>
+     <rect width='100%' height='100%' fill='#111111'/>
+     <text x='50%' y='50%' fill='#9aa4a8' font-family='Arial,Helvetica' font-size='20' text-anchor='middle' dominant-baseline='middle'>No thumbnail</text>
+   </svg>`
+);
+const FALLBACK_SRC = `data:image/svg+xml,${FALLBACK_SVG}`;
+
+/* Parse YouTube search HTML for videoRenderer blocks: id + title */
+function parseYouTubeHTML(html){
+  const re = /"videoRenderer":\s*\{[\s\S]*?"videoId":"([A-Za-z0-9_-]{11})"[\s\S]*?"title":\s*\{\s*"runs":\s*\[\s*\{\s*"text":"([^"]+?)"/g;
+  const results=[];
+  let m;
+  while((m = re.exec(html)) !== null){
+    const id = m[1];
+    const title = m[2];
+    if(id && id.length===11) results.push({id, title});
+  }
+  return results;
+}
+
+async function fetchSearchResults(query){
+  try{
+    const url = PROXY + 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query);
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('proxy fetch failed');
+    const txt = await res.text();
+    const parsed = parseYouTubeHTML(txt);
+    return parsed;
+  }catch(err){
+    console.error('fetchSearchResults error', err);
+    return [];
+  }
+}
+
+/* Append N videos from resultsCache to the grid. returns appended count. */
+function renderChunk(count){
+  let appended = 0;
+  while(appended < count && resultsIndex < resultsCache.length){
+    const v = resultsCache[resultsIndex++];
+    if(seenIds.has(v.id)) continue;
+    seenIds.add(v.id);
+    appendCard(v);
+    appended++;
+  }
+  return appended;
+}
+
+function appendCard(video){
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  // create elements so we can attach error handlers
+  const img = document.createElement('img');
+  img.className = 'thumb lazy';
+  img.dataset.src = `https://i.ytimg.com/vi/${video.id}/hq720.jpg`;
+  img.alt = video.title || 'Video thumbnail';
+  img.src = FALLBACK_SRC; // initially fallback until lazy observer swaps to real src
+
+  // attach error fallback (in case real src 404s)
+  img.addEventListener('error', ()=> {
+    if(img.src !== FALLBACK_SRC) img.src = FALLBACK_SRC;
+  });
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = video.title || 'Untitled';
+  const sub = document.createElement('div');
+  sub.className = 'sub';
+  sub.textContent = `https://youtube.com/watch?v=${video.id}`;
+
+  meta.appendChild(title);
+  meta.appendChild(sub);
+
+  card.appendChild(img);
+  card.appendChild(meta);
+
+  card.onclick = () => openModal(video.id);
+  grid.appendChild(card);
+
+  // lazy load real src
+  const io = new IntersectionObserver((entries, obs)=>{
+    entries.forEach(en=>{
+      if(en.isIntersecting){
+        // set real src; onload will remove blur effect (CSS transition)
+        img.src = img.dataset.src;
+        img.onload = ()=> img.classList.add('loaded');
+        obs.disconnect();
+      }
+    });
+  }, {rootMargin:'200px'});
+  io.observe(img);
+}
+
+/* =========================
+   Flow: ensureMore / fetching
+   ========================= */
+async function ensureMore(requestedCount = LOAD_MORE_COUNT){
+  if(isFetching) return 0;
+  // If cache has items, render from cache first
+  if(resultsIndex < resultsCache.length){
+    const got = renderChunk(requestedCount);
+    // If we managed to render some, return
+    if(got > 0) return got;
+  }
+
+  // Need to fetch next chunk (from feedQueue or search)
+  isFetching = true;
+  showLoader(true);
+  let fetched = [];
+
+  if(currentQuery){
+    // For a user search we re-fetch that query (basic approach)
+    fetched = await fetchSearchResults(currentQuery);
+    resultsCache = dedupeConcat(resultsCache, fetched);
+    // if no new items, we'll return 0 and disable button later
+  } else {
+    // Pull next search term from feedQueue
+    if(feedQueue.length === 0) resetFeedQueue();
+    const next = feedQueue.shift();
+    fetched = await fetchSearchResults(next);
+    resultsCache = resultsCache.concat(fetched);
+  }
+
+  // Try rendering requested number
+  const got = renderChunk(requestedCount);
+  showLoader(false);
+  isFetching = false;
+  return got;
+}
+
+/* dedupe by id when concatenating */
+function dedupeConcat(existing, incoming){
+  const map = new Map();
+  for(const e of existing) map.set(e.id, e);
+  for(const n of incoming) if(!map.has(n.id)) map.set(n.id, n);
+  return Array.from(map.values());
+}
+
+/* initialFill: keep loading searches until we have INITIAL_LOAD_COUNT cards or we've tried a few times */
+async function initialFill(){
+  let tries = 0;
+  while(grid.children.length < INITIAL_LOAD_COUNT && tries < 8){
+    const need = Math.max(8, INITIAL_LOAD_COUNT - grid.children.length);
+    const got = await ensureMore(need);
+    tries++;
+    if(got === 0) break; // nothing more to get
+  }
+  // If after initial filling we have fewer than requested, disable load button
+  updateLoadMoreState();
+}
+
+/* =========================
+   Modal management
+   ========================= */
+function openModal(id){
+  const youtubeUrl = `https://www.youtube.com/watch?v=${id}`;
+  player.src = `https://embed-player.com/video/?source=${encodeURIComponent(youtubeUrl)}&color=%238b7765&preload=metadata`;
+  openYoutube.onclick = ()=> window.open(youtubeUrl,'_blank');
+  downloadBtn.onclick = ()=> window.open(`https://yt1d.com/watch?v=${id}`,'_blank');
+  overlay.style.display = 'flex';
+  requestAnimationFrame(()=> modal.classList.add('open'));
+  overlay.setAttribute('aria-hidden','false');
+  document.body.style.overflow = 'hidden';
+}
+function closeModal(){
+  modal.classList.remove('open');
+  setTimeout(()=> {
+    overlay.style.display = 'none';
+    player.src = '';
+    overlay.setAttribute('aria-hidden','true');
+  },220);
+  document.body.style.overflow = '';
+}
+overlay.addEventListener('click', (e)=>{
+  if(e.target === overlay) closeModal();
+});
+closeBtn.addEventListener('click', closeModal);
+
+/* =========================
+   Search + Enter Link
+   ========================= */
+searchBtn.addEventListener('click', ()=> doSearch(searchInput.value));
+searchInput.addEventListener('keydown', (e)=> { if(e.key === 'Enter') doSearch(searchInput.value); });
+
+async function doSearch(q){
+  q = (q||'').trim();
+  if(!q) return;
+  currentQuery = q;
+  resultsCache = [];
+  resultsIndex = 0;
+  seenIds.clear();
+  grid.innerHTML = '';
+  endNote.style.display='none';
+  showLoader(true);
+  const fetched = await fetchSearchResults(q);
+  resultsCache = fetched;
+  showLoader(false);
+  await initialFill();
+  updateLoadMoreState();
+}
+
+enterLinkBtn.addEventListener('click', enterLinkPrompt);
+function enterLinkPrompt(){
+  const link = prompt('Paste a YouTube link (https://youtube.com/watch?v=ID):');
+  if(!link) return;
+  try{
+    const u = new URL(link.trim());
+    const vid = u.searchParams.get('v') || (u.pathname && u.pathname.split('/').pop());
+    if(vid && vid.length===11) openModal(vid);
+    else alert('Could not find a valid video id in that link.');
+  }catch(e){
+    alert('Invalid URL');
+  }
+}
+
+/* Load more button handler */
+loadMoreBtn.addEventListener('click', async ()=>{
+  loadMoreBtn.disabled = true;
+  loadMoreBtn.textContent = 'Loading…';
+  const got = await ensureMore(LOAD_MORE_COUNT);
+  if(got === 0){
+    // nothing new
+    endNote.style.display = 'block';
+    loadMoreBtn.disabled = true;
+    loadMoreBtn.textContent = 'No more results';
+  } else {
+    loadMoreBtn.disabled = false;
+    loadMoreBtn.textContent = `Load more (${LOAD_MORE_COUNT})`;
+  }
+});
+
+/* helper to set state of load more on init or after searches */
+function updateLoadMoreState(){
+  const maybeMore = (feedQueue.length > 0) || (resultsIndex < resultsCache.length) || currentQuery;
+  loadMoreBtn.disabled = !maybeMore ? true : false;
+  loadMoreBtn.textContent = maybeMore ? `Load more (${LOAD_MORE_COUNT})` : 'No more results';
+  if(!maybeMore) endNote.style.display = 'block';
+  else endNote.style.display = 'none';
+}
+
+/* =========================
+   Utilities
+   ========================= */
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* =========================
+   Init
+   ========================= */
+(async function start(){
+  showLoader(true);
+  if(feedQueue.length===0) resetFeedQueue();
+  // seed with two searches so we have enough to reach initial count faster
+  const first = feedQueue.shift();
+  const second = feedQueue.shift();
+  const a = await fetchSearchResults(first);
+  const b = await fetchSearchResults(second);
+  resultsCache = a.concat(b);
+  resultsIndex = 0;
+  showLoader(false);
+
+  await initialFill();
+  updateLoadMoreState();
+})();
+</script>
+</body>
+</html>
